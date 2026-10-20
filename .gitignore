@@ -1,7 +1,11 @@
 bin/
 web/dist/
 .graphify/
-# .build 킷은 스크립트만 추적하고 설치된 도구/캐시는 제외
+# .build 킷은 스크립트와 검증용 kfake 소스만 추적. SDK/캐시/실행 파일은 제외
 .build/*
 !.build/*.ps1
+!.build/kfake/
+.build/kfake/*.exe
 .build/activate.ps1
+.docs/
+.archify
