@@ -1,0 +1,7 @@
+bin/
+web/dist/
+.graphify/
+# .build 킷은 스크립트만 추적하고 설치된 도구/캐시는 제외
+.build/*
+!.build/*.ps1
+.build/activate.ps1
