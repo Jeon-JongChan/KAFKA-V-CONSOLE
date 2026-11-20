@@ -1,5 +1,5 @@
 // kfake 인메모리 Kafka 로 프로듀서/컨슈머 그룹 트래픽을 만드는 검증용 데모.
-// 실행: .\.build\kfake.ps1  (콘솔은 별도로 --brokers 127.0.0.1:19092)
+// 실행: .\.tools\.build\kfake.ps1  (콘솔은 별도로 --brokers 127.0.0.1:19092)
 package main
 
 import (

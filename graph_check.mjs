@@ -1,6 +1,7 @@
-// graph.js 자기 검사. `.build` 의 node 또는 시스템 node 로 실행.
-import { prefixOf, planGraph, NODE_CAP } from './web/graph.js'
+// graph.js 자기 검사. `.tools/.build` 의 node 또는 시스템 node 로 실행.
+import { prefixOf, planGraph, NODE_CAP } from './app/web/graph.js'
 
+// assert 는 그래프 회귀 조건을 만족하지 못하면 검사를 중단한다.
 function assert(cond, msg) {
   if (!cond) throw new Error(msg)
 }

@@ -6,8 +6,13 @@ const { reactive } = Vue
 export const store = reactive({ snap: null, error: '', loading: false, interval: 5 })
 
 /** JSON API 호출. 실패 시 서버가 준 error 메시지로 예외를 던진다. */
-export async function api(path) {
-  const r = await fetch(path)
+export async function api(path, opts) {
+  const init = opts ? { ...opts } : undefined
+  if (init?.body && typeof init.body !== 'string') {
+    init.body = JSON.stringify(init.body)
+    init.headers = { 'Content-Type': 'application/json', ...(init.headers || {}) }
+  }
+  const r = await fetch(path, init)
   const j = await r.json().catch(() => ({}))
   if (!r.ok) throw new Error(j.error || r.statusText)
   return j

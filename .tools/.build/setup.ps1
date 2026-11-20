@@ -38,7 +38,7 @@ $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $script:GoVersionSpecified=$PSBoundParameters.ContainsKey('GoVersion')
 $Root=$PSScriptRoot
-if (-not $Project) { $Project=Split-Path -Parent $Root }
+if (-not $Project) { $Project=Split-Path -Parent (Split-Path -Parent $Root) }
 if (-not (Test-Path -LiteralPath $Project -PathType Container)) { throw "Project directory not found: $Project" }
 $Project=(Resolve-Path -LiteralPath $Project).Path
 $State=Join-Path $Root '_state'
@@ -104,7 +104,7 @@ function Activate {
 }
 function WriteActivation {
  $s=@'
-# Load into the current PowerShell process with: . .\.build\activate.ps1
+# Load into the current PowerShell process with: . .\.tools\.build\activate.ps1
 $localRoot=$PSScriptRoot
 $values=@{
  RUSTUP_HOME="$localRoot\rust\rustup"; CARGO_HOME="$localRoot\rust\cargo"
@@ -204,7 +204,7 @@ function InstallPython {
  & $uv python install $PythonVersion --default
  AssertExit 'Python runtime installation failed'
  $py=Join-Path $Root 'python\bin\python.exe'
- if (-not (Test-Path $py)) { throw 'Portable python.exe missing from .build/python/bin' }
+ if (-not (Test-Path $py)) { throw 'Portable python.exe missing from .tools/.build/python/bin' }
  & $py --version; AssertExit 'Portable Python binary verification failed'
 }
 function InstallKotlin {
@@ -313,7 +313,7 @@ function EmulatorRemove {
  }
 }
 function ProjectRef {
- $base=(Split-Path -Parent $Root).TrimEnd('\')
+ $base=(Split-Path -Parent (Split-Path -Parent $Root)).TrimEnd('\')
  if ($Project -ieq $base) { return '.' }
  if ($Project.StartsWith($base+'\',[StringComparison]::OrdinalIgnoreCase)) { return $Project.Substring($base.Length+1) }
  return $Project

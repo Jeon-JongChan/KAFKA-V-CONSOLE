@@ -1,11 +1,9 @@
-bin/
-web/dist/
+# build.ps1 writes target binaries and the Linux launcher into this directory
+/kv-console-*
+/kv-console.sh
+/kv-console.json
+/bin/
+app/web/dist/
 .graphify/
-# .build 킷은 스크립트와 검증용 kfake 소스만 추적. SDK/캐시/실행 파일은 제외
-.build/*
-!.build/*.ps1
-!.build/kfake/
-.build/kfake/*.exe
-.build/activate.ps1
 .docs/
 .archify

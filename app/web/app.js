@@ -2,7 +2,8 @@
 import { store, refresh, fmtTime } from './util.js'
 import { t, i18n, setLang, LOCALES } from './i18n.js'
 import { Topology } from './topology.js'
-import { Overview, Topics, TopicDetail, Groups, GroupDetail } from './views.js'
+import { Overview, Topics, TopicDetail, Groups, GroupDetail, Settings } from './views.js'
+import { Connect } from './connect.js'
 const { createApp, ref, computed, watch, onMounted } = Vue
 
 /** "#/topics/foo" → ['topics', 'foo'] */
@@ -14,11 +15,13 @@ const ICON = {
   topology: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>',
   topics: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>',
   groups: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  connect: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
 }
-const NAV = [['', 'nav.overview', ICON.overview], ['topology', 'nav.topology', ICON.topology], ['topics', 'nav.topics', ICON.topics], ['groups', 'nav.groups', ICON.groups]]
+const NAV = [['', 'nav.overview', ICON.overview], ['topology', 'nav.topology', ICON.topology], ['topics', 'nav.topics', ICON.topics], ['groups', 'nav.groups', ICON.groups], ['connect', 'nav.connect', ICON.connect], ['settings', 'nav.settings', ICON.settings]]
 
 const App = {
-  components: { Overview, Topology, Topics, TopicDetail, Groups, GroupDetail },
+  components: { Overview, Topology, Topics, TopicDetail, Groups, GroupDetail, Connect, Settings },
   setup() {
     const path = ref(parse())
     window.addEventListener('hashchange', () => { path.value = parse(); window.scrollTo(0, 0) })
@@ -30,6 +33,8 @@ const App = {
       if (a === 'topics') return b ? ['TopicDetail', { name: b }, b, [['topics', t('nav.topics')]]] : ['Topics', {}, t('nav.topics'), []]
       if (a === 'groups') return b ? ['GroupDetail', { id: b }, b, [['groups', t('nav.groups')]]] : ['Groups', {}, t('nav.groups'), []]
       if (a === 'topology') return ['Topology', {}, t('nav.topology'), []]
+      if (a === 'connect') return ['Connect', {}, t('nav.connect'), []]
+      if (a === 'settings') return ['Settings', {}, t('nav.settings'), []]
       return ['Overview', {}, t('nav.overview'), []]
     })
 
@@ -77,10 +82,12 @@ const App = {
       </header>
       <main class="page">
         <h1>{{ view[2] }}</h1>
-        <p v-if="store.error" class="banner bad">{{ t('err.kafka', { msg: store.error }) }}</p>
+        <p v-if="store.error" class="banner bad">{{ t('err.kafka', { msg: store.error }) }}
+          <a v-if="view[0] !== 'Settings'" href="#/settings">{{ t('err.openSettings') }}</a>
+        </p>
         <p v-for="e in store.snap?.errors || []" class="banner warn">{{ e }}</p>
-        <p v-if="!store.snap && !store.error" class="empty">{{ t('common.loading') }}</p>
-        <component v-if="store.snap" :is="view[0]" v-bind="view[1]" />
+        <p v-if="!store.snap && !store.error && view[0] !== 'Settings' && view[0] !== 'Connect'" class="empty">{{ t('common.loading') }}</p>
+        <component v-if="view[0] === 'Settings' || view[0] === 'Connect' || store.snap" :is="view[0]" v-bind="view[1]" />
       </main>
     </div>
   </div>`,

@@ -1,6 +1,6 @@
 // Redpanda Console 구성을 따르는 화면: Overview, Topics(+상세), Consumer Groups(+상세).
 // 화면 문자열은 모두 locales/*.js 의 키로 참조한다 (템플릿의 t() 는 app.js 에서 전역 등록).
-import { store, api, fmtBytes, fmtNum, fmtRate, fmtTime, stateClass, groupRate, groupByteRate, link, isInternal, matcher, health } from './util.js'
+import { store, api, refresh, fmtBytes, fmtNum, fmtRate, fmtTime, stateClass, groupRate, groupByteRate, link, isInternal, matcher, health } from './util.js'
 import { t } from './i18n.js'
 const { ref, computed, watch } = Vue
 
@@ -359,4 +359,81 @@ export const GroupDetail = {
     </section>
   </div>
   <p v-else-if="store.snap" class="empty">{{ t('gd.notFound', { id }) }}</p>`,
+}
+
+/** Kafka 연결 설정. 저장 시 서버가 재연결하고 kv-console.json 에 남긴다. */
+export const Settings = {
+  setup() {
+    const form = ref(null)
+    const loading = ref(true)
+    const saving = ref(false)
+    const error = ref('')
+    const ok = ref('')
+    const load = async () => {
+      loading.value = true
+      error.value = ''
+      try {
+        const s = await api('/api/settings')
+        form.value = { ...s, saslPass: '' }
+      } catch (e) {
+        error.value = e.message
+      } finally {
+        loading.value = false
+      }
+    }
+    const save = async () => {
+      saving.value = true
+      error.value = ''
+      ok.value = ''
+      try {
+        const s = await api('/api/settings', { method: 'PUT', body: form.value })
+        form.value = { ...s, saslPass: '' }
+        ok.value = t('settings.saved')
+        await refresh()
+      } catch (e) {
+        error.value = e.message
+      } finally {
+        saving.value = false
+      }
+    }
+    load()
+    return { form, loading, saving, error, ok, save, t }
+  },
+  template: `
+  <div v-if="loading" class="empty">{{ t('common.loading') }}</div>
+  <form v-else-if="form" class="settings" @submit.prevent="save">
+    <p class="muted">{{ t('settings.hint', { path: form.configPath }) }}</p>
+    <p v-if="error" class="banner bad">{{ error }}</p>
+    <p v-if="ok" class="banner info">{{ ok }}</p>
+    <label>{{ t('settings.brokers') }}
+      <input v-model="form.brokers" required placeholder="localhost:9092">
+    </label>
+    <div class="settings-row">
+      <label class="check"><input type="checkbox" v-model="form.tls"> {{ t('settings.tls') }}</label>
+      <label class="check"><input type="checkbox" v-model="form.tlsSkipVerify"> {{ t('settings.tlsSkip') }}</label>
+    </div>
+    <label>{{ t('settings.tlsCA') }}<input v-model="form.tlsCA" :placeholder="t('settings.pathPh')"></label>
+    <label>{{ t('settings.tlsCert') }}<input v-model="form.tlsCert" :placeholder="t('settings.pathPh')"></label>
+    <label>{{ t('settings.tlsKey') }}<input v-model="form.tlsKey" :placeholder="t('settings.pathPh')"></label>
+    <label>{{ t('settings.saslMech') }}
+      <select v-model="form.saslMechanism">
+        <option value="">{{ t('settings.saslNone') }}</option>
+        <option>PLAIN</option>
+        <option>SCRAM-SHA-256</option>
+        <option>SCRAM-SHA-512</option>
+      </select>
+    </label>
+    <label>{{ t('settings.saslUser') }}<input v-model="form.saslUser" autocomplete="username"></label>
+    <label>{{ t('settings.saslPass') }}
+      <input v-model="form.saslPass" type="password" autocomplete="current-password"
+        :placeholder="form.saslPassSet ? t('settings.passKeep') : ''">
+    </label>
+    <label>{{ t('settings.connect') }}
+      <input v-model="form.connectUrl" :placeholder="t('settings.connectPh')">
+    </label>
+    <p class="muted small">{{ t('settings.connectHint') }}</p>
+    <div class="settings-actions">
+      <button type="submit" :disabled="saving">{{ saving ? t('settings.saving') : t('settings.save') }}</button>
+    </div>
+  </form>`,
 }

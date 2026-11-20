@@ -1,0 +1,10 @@
+/_state/
+/activate.ps1
+/go/
+/nodejs/
+/rust/
+/kotlin/
+/csharp/
+/python/
+/kfake/*.exe
+/kfake/kfake
