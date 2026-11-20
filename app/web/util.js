@@ -6,7 +6,7 @@ const { reactive } = Vue
 export const store = reactive({ snap: null, error: '', loading: false, interval: 5 })
 
 /** JSON API 호출. 실패 시 서버가 준 error 메시지로 예외를 던진다. */
-export async function api(path, opts) {
+export async function api(path, opts, onResponse) {
   const init = opts ? { ...opts } : undefined
   if (init?.body && typeof init.body !== 'string') {
     init.body = JSON.stringify(init.body)
@@ -15,8 +15,21 @@ export async function api(path, opts) {
   const r = await fetch(path, init)
   const j = await r.json().catch(() => ({}))
   if (!r.ok) throw new Error(j.error || r.statusText)
+  onResponse?.(r.headers)
   return j
 }
+
+/** 목록과 그 목록을 읽은 연결의 관리 토큰을 함께 얻는다. */
+export async function managementState(path) {
+  let target
+  const data = await api(path, undefined, (headers) => { target = headers.get('X-KVC-Target') })
+  return { data, target }
+}
+
+/** 교차 출처 요청을 막고 화면에서 확인한 연결에만 변경을 적용한다. */
+export const manage = (path, method, target, body) => api(path, {
+  method, body, headers: { 'X-KVC-Action': 'manage', 'X-KVC-Target': target, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+})
 
 /** 클러스터 스냅샷을 새로 받아 store 에 반영한다. */
 export async function refresh() {

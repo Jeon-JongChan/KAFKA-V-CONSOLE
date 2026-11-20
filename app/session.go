@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -23,6 +24,7 @@ type session struct {
 	snaps   *snapshotService
 	profile connectionProfile
 	path    string
+	target  string // 연결 프로필을 바꾸면 기존 관리 화면의 쓰기 요청을 무효화한다.
 }
 
 // openSession 은 프로필로 Kafka 에 붙고 스냅샷 서비스를 만든다.
@@ -75,6 +77,14 @@ func (s *session) Admin() *kadm.Client {
 	return s.adm
 }
 
+// targetLocked 는 현재 연결의 관리 토큰이다. 호출자는 s.mu를 보유해야 한다.
+func (s *session) targetLocked() string {
+	if s.target == "" {
+		s.target = rand.Text()
+	}
+	return s.target
+}
+
 // Probe 는 브로커 메타데이터로 연결을 한번 확인한다.
 func (s *session) Probe(ctx context.Context) error {
 	_, err := s.Admin().BrokerMetadata(ctx)
@@ -108,6 +118,7 @@ func (s *session) ApplyAndSave(next connectionProfile) error {
 	s.opts = opts
 	s.adm = adm
 	s.profile = next
+	s.target = ""
 	s.snaps.replaceCollector(kafkaSnapshotCollector{adm: adm, now: time.Now})
 	path := s.path
 	s.mu.Unlock()

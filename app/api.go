@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/pkg/kmsg"
 )
 
 // Snapshot 은 UI 가 한 번에 받아가는 클러스터 전체 상태다.
@@ -127,29 +131,106 @@ func (s *session) handleCluster(w http.ResponseWriter, r *http.Request) {
 func (s *session) handleTopicConfig(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	rcs, err := s.Admin().DescribeTopicConfigs(ctx, r.PathValue("name"))
+	s.mu.Lock()
+	cl := s.cl
+	target := s.targetLocked()
+	s.mu.Unlock()
+	if cl == nil {
+		writeErr(w, http.StatusBadGateway, errors.New("Kafka 연결이 없습니다"))
+		return
+	}
+	// kadm의 조회 모델은 읽기 전용 플래그를 보존하지 않으므로 브로커 응답을 직접 읽는다.
+	req := kmsg.NewPtrDescribeConfigsRequest()
+	req.Resources = []kmsg.DescribeConfigsRequestResource{{ResourceType: kmsg.ConfigResourceTypeTopic, ResourceName: r.PathValue("name")}}
+	res, err := req.RequestWith(ctx, cl)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err)
 		return
 	}
-	type cfg struct {
-		Key       string `json:"key"`
-		Value     string `json:"value"`
-		Source    string `json:"source"`
-		Sensitive bool   `json:"sensitive"`
+	if len(res.Resources) != 1 || res.Resources[0].ResourceName != r.PathValue("name") {
+		writeErr(w, http.StatusBadGateway, errors.New("브로커가 요청한 토픽 설정을 반환하지 않았습니다"))
+		return
 	}
-	out := []cfg{}
-	for _, rc := range rcs {
-		if rc.Err != nil {
-			writeErr(w, http.StatusBadGateway, rc.Err)
-			return
+	rc := res.Resources[0]
+	if err := kerr.ErrorForCode(rc.ErrorCode); err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	out := make([]topicConfig, 0, len(rc.Configs))
+	for _, c := range rc.Configs {
+		value := ""
+		if !c.IsSensitive && c.Value != nil {
+			value = *c.Value
 		}
-		for _, c := range rc.Configs {
-			out = append(out, cfg{Key: c.Key, Value: c.MaybeValue(), Source: c.Source.String(), Sensitive: c.Sensitive})
+		// 구버전 응답에서는 Source 대신 IsDefault만 들어온다.
+		source := c.Source
+		if res.Version == 0 && c.IsDefault {
+			source = kmsg.ConfigSourceDefaultConfig
 		}
+		out = append(out, topicConfig{Key: c.Name, Value: value, Source: source.String(), Sensitive: c.IsSensitive, ReadOnly: c.ReadOnly})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	w.Header().Set("X-KVC-Target", target)
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, out)
+}
+
+// topicConfig 는 브로커가 보고한 유효값과 GUI의 편집 가능 여부다.
+type topicConfig struct {
+	Key       string `json:"key"`
+	Value     string `json:"value"`
+	Source    string `json:"source"`
+	Sensitive bool   `json:"sensitive"`
+	ReadOnly  bool   `json:"readOnly"`
+}
+
+// handleChangeTopicConfig 는 다른 키를 건드리지 않고 지정한 키만 설정하거나 상속값으로 되돌린다.
+func (s *session) handleChangeTopicConfig(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Key   string  `json:"key"`
+		Op    string  `json:"op"`
+		Value *string `json:"value"`
+	}
+	if !decodeManagementJSON(w, r, &in) {
+		return
+	}
+	if strings.TrimSpace(in.Key) == "" || (in.Op == "set" && in.Value == nil) ||
+		(in.Op == "delete" && in.Value != nil) || (in.Op != "set" && in.Op != "delete") {
+		writeErr(w, http.StatusBadRequest, errors.New("설정 키와 올바른 변경 또는 삭제 작업을 지정하세요"))
+		return
+	}
+	op := kadm.SetConfig
+	if in.Op == "delete" {
+		op = kadm.DeleteConfig
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	name := r.PathValue("name")
+	s.mu.Lock()
+	adm, matches := s.adm, r.Header.Get("X-KVC-Target") == s.targetLocked()
+	s.mu.Unlock()
+	if !matches {
+		writeErr(w, http.StatusConflict, errManagementTarget)
+		return
+	}
+	if adm == nil {
+		writeErr(w, http.StatusBadGateway, errors.New("Kafka 연결이 없습니다"))
+		return
+	}
+	results, err := adm.AlterTopicConfigs(ctx, []kadm.AlterConfig{{Name: in.Key, Op: op, Value: in.Value}}, name)
+	if err == nil {
+		var result kadm.AlterConfigsResponse
+		result, err = results.On(name, nil)
+		// 브로커의 상세 오류는 제출한 민감값을 포함할 수 있다.
+		if err == nil {
+			err = result.Err
+		}
+	}
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // Message 는 메시지 뷰어에 보여줄 레코드 하나다.

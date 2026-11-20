@@ -171,6 +171,7 @@ func (s *session) ConnectReport(ctx context.Context, snap *Snapshot) (ConnectVie
 func (s *session) handleConnect(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	raw := s.profile.ConnectURL
+	target := s.targetLocked()
 	s.mu.Unlock()
 	if strings.TrimSpace(raw) == "" {
 		writeJSON(w, http.StatusOK, ConnectView{Connectors: []ConnectorView{}, Workers: []ConnectWorker{}})
@@ -181,9 +182,11 @@ func (s *session) handleConnect(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	base, err := parseConnectURL(raw)
 	if err != nil {
-		writeJSON(w, http.StatusOK, ConnectView{URL: raw, Error: err.Error(), Connectors: []ConnectorView{}, Workers: []ConnectWorker{}})
+		writeJSON(w, http.StatusOK, ConnectView{Error: err.Error(), Connectors: []ConnectorView{}, Workers: []ConnectWorker{}})
 		return
 	}
+	// 화면에는 관리 대상 주소만 보여 주고 URL의 인증 정보와 쿼리는 제외한다.
+	displayURL := base.Scheme + "://" + base.Host + base.EscapedPath()
 
 	var (
 		snap     *Snapshot
@@ -205,13 +208,15 @@ func (s *session) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}()
 	wg.Wait()
 	if fetchErr != nil {
-		writeJSON(w, http.StatusOK, ConnectView{URL: raw, Error: fetchErr.Error(), Connectors: []ConnectorView{}, Workers: []ConnectWorker{}})
+		writeJSON(w, http.StatusOK, ConnectView{URL: displayURL, Error: fetchErr.Error(), Connectors: []ConnectorView{}, Workers: []ConnectWorker{}})
 		return
 	}
-	view := assembleConnect(raw, info, items, snap)
+	view := assembleConnect(displayURL, info, items, snap)
 	if snapErr != nil {
 		view.ClusterError = snapErr.Error()
 	}
+	w.Header().Set("X-KVC-Target", target)
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, view)
 }
 

@@ -75,7 +75,7 @@ func parseConfig() (config, string) {
   kv-console [플래그]              Windows: 데스크톱 창 / Linux: 텍스트 콘솔
   kv-console -console [플래그]     텍스트 상태 출력
   kv-console status [플래그]       -console 과 동일
-  kv-console -listen :8080         브라우저용 HTTP 서버
+  kv-console -listen 127.0.0.1:8080  로컬 브라우저용 HTTP 서버
 
 연결 설정은 UI 설정 또는 %s (CLI/환경변수 우선).
 
@@ -83,7 +83,7 @@ func parseConfig() (config, string) {
 `, path)
 		flag.PrintDefaults()
 	}
-	flag.StringVar(&c.listen, "listen", envOr("KVC_LISTEN", ""), "HTTP 리슨 주소 (설정 시 데스크톱 대신 브라우저 서버, KVC_LISTEN)")
+	flag.StringVar(&c.listen, "listen", envOr("KVC_LISTEN", ""), "HTTP 리슨 주소 (자체 인증 없음, 로컬 바인딩 권장, KVC_LISTEN)")
 	flag.StringVar(&c.brokers, "brokers", envOr("KVC_BROKERS", firstNonEmpty(file.Brokers, "localhost:9092")), "쉼표로 구분한 브로커 목록 (KVC_BROKERS)")
 	flag.BoolVar(&c.tls, "tls", envBool("KVC_TLS", file.TLS), "TLS 사용 (KVC_TLS=true)")
 	flag.BoolVar(&c.tlsSkipVerify, "tls-skip-verify", envBool("KVC_TLS_SKIP_VERIFY", file.TLSSkipVerify), "서버 인증서 검증 생략 (KVC_TLS_SKIP_VERIFY=true)")

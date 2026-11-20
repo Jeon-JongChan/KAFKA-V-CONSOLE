@@ -1,8 +1,8 @@
 // Redpanda Console 구성을 따르는 화면: Overview, Topics(+상세), Consumer Groups(+상세).
 // 화면 문자열은 모두 locales/*.js 의 키로 참조한다 (템플릿의 t() 는 app.js 에서 전역 등록).
-import { store, api, refresh, fmtBytes, fmtNum, fmtRate, fmtTime, stateClass, groupRate, groupByteRate, link, isInternal, matcher, health } from './util.js'
+import { store, api, manage, managementState, refresh, fmtBytes, fmtNum, fmtRate, fmtTime, stateClass, groupRate, groupByteRate, link, isInternal, matcher, health } from './util.js'
 import { t } from './i18n.js'
-const { ref, computed, watch } = Vue
+const { ref, computed, watch, nextTick } = Vue
 
 /** 토픽별 소비 그룹 목록 (스냅샷에서 역참조) */
 function consumersOf(topic) {
@@ -143,8 +143,10 @@ export const Topics = {
   </div>`,
 }
 
+/** 메시지·컨슈머·파티션·설정을 보는 토픽 상세 화면이다. */
 export const TopicDetail = {
   props: ['name'],
+  /** 현재 토픽의 조회와 설정 편집 상태를 연결한다. */
   setup(props) {
     const tab = ref('messages')
     const topic = computed(() => store.snap?.topics.find((x) => x.name === props.name))
@@ -154,9 +156,57 @@ export const TopicDetail = {
     const configs = ref(null)
     const hideDefault = ref(false)
     const cfgError = ref('')
-    const shownConfigs = computed(() => (configs.value || []).filter((c) => !hideDefault.value || c.source !== 'DEFAULT_CONFIG'))
+    const cfgNotice = ref('')
+    const cfgLoading = ref(false)
+    const cfgBusy = ref(false)
+    const cfgEdit = ref(null)
+    const cfgTarget = ref(null)
+    const cfgForm = ref(null)
+    /** 상속된 값까지 숨겨 토픽에 직접 설정한 값만 볼 수 있게 한다. */
+    const shownConfigs = computed(() => (configs.value || []).filter((c) => !hideDefault.value || c.source === 'DYNAMIC_TOPIC_CONFIG'))
+    /** 설정 조회와 변경이 같은 토픽 경로를 사용하도록 한다. */
+    const configPath = computed(() => `/api/topics/${encodeURIComponent(props.name)}/config`)
+    /** 설정을 다시 읽되 이동 전 토픽의 응답은 버린다. */
     async function loadConfig() {
-      try { configs.value = await api(`/api/topics/${encodeURIComponent(props.name)}/config`); cfgError.value = '' } catch (e) { cfgError.value = e.message }
+      const path = configPath.value
+      cfgLoading.value = true
+      cfgError.value = ''
+      try {
+        const { data, target } = await managementState(path)
+        if (path === configPath.value) { configs.value = data; cfgTarget.value = target }
+      } catch (e) {
+        if (path === configPath.value) { configs.value = null; cfgError.value = e.message }
+      } finally {
+        if (path === configPath.value) cfgLoading.value = false
+      }
+    }
+    /** 선택한 키와 작업을 확인 폼에 표시한다. 민감값은 불러오지 않는다. */
+    async function editConfig(c, remove = false) {
+      cfgEdit.value = { key: c.key, value: c.sensitive ? '' : c.value, sensitive: c.sensitive, remove, target: cfgTarget.value }
+      cfgError.value = ''
+      cfgNotice.value = ''
+      await nextTick()
+      cfgForm.value?.querySelector(remove ? 'button[type="button"]' : 'input')?.focus()
+    }
+    /** 한 키만 반영한 뒤 브로커가 계산한 유효값을 다시 읽는다. */
+    async function saveConfig() {
+      if (!cfgEdit.value || cfgBusy.value) return
+      const path = configPath.value
+      const { key, value, remove, target } = cfgEdit.value
+      cfgBusy.value = true
+      cfgError.value = ''
+      try {
+        await manage(path, 'PATCH', target, remove ? { key, op: 'delete' } : { key, op: 'set', value })
+        if (path === configPath.value) {
+          cfgEdit.value = null
+          cfgNotice.value = t('td.configSaved')
+          await loadConfig()
+        }
+      } catch (e) {
+        if (path === configPath.value) cfgError.value = e.message
+      } finally {
+        cfgBusy.value = false
+      }
     }
 
     // 메시지 탭: 탭 진입 시 최신 메시지를 한 번 읽고, 이후는 조회 버튼으로만 다시 읽는다
@@ -185,6 +235,7 @@ export const TopicDetail = {
     // 다른 토픽으로 이동: 이미 messages 탭이면 직접 다시 읽고, 아니면 탭 전환 watch 가 읽는다
     watch(() => props.name, () => {
       configs.value = null; msgs.value = null
+      cfgEdit.value = null; cfgError.value = ''; cfgNotice.value = ''; cfgLoading.value = false
       if (tab.value === 'messages') loadMessages(); else tab.value = 'messages'
     })
     const tabs = computed(() => [
@@ -193,7 +244,7 @@ export const TopicDetail = {
       ['partitions', t('td.tabPartitions', { n: topic.value?.partitions.length ?? 0 })],
       ['config', t('td.tabConfig')],
     ])
-    return { store, tab, tabs, topic, consumers, configs, shownConfigs, hideDefault, cfgError, mq, msgs, msgError, msgLoading, open, toggle, loadMessages, pretty, fmtBytes, fmtNum, fmtRate, fmtTime, stateClass, link }
+    return { store, tab, tabs, topic, consumers, configs, shownConfigs, hideDefault, cfgError, cfgNotice, cfgLoading, cfgBusy, cfgEdit, cfgTarget, cfgForm, loadConfig, editConfig, saveConfig, mq, msgs, msgError, msgLoading, open, toggle, loadMessages, pretty, fmtBytes, fmtNum, fmtRate, fmtTime, stateClass, link }
   },
   template: `
   <div v-if="topic">
@@ -263,13 +314,38 @@ export const TopicDetail = {
       </table>
 
       <div v-if="tab === 'config'">
-        <div class="toolbar"><label><input type="checkbox" v-model="hideDefault"> {{ t('td.hideDefault') }}</label></div>
-        <p v-if="cfgError" class="bad">{{ cfgError }}</p>
+        <div class="toolbar">
+          <label><input type="checkbox" v-model="hideDefault"> {{ t('td.hideDefault') }}</label>
+          <button @click="loadConfig" :disabled="cfgBusy || cfgLoading || !!cfgEdit">{{ t('top.refresh') }}</button>
+          <span v-if="cfgLoading" class="muted">{{ t('common.loading') }}</span>
+        </div>
+        <p v-if="cfgError" class="banner bad" role="alert">{{ cfgError }}</p>
+        <p v-if="cfgNotice" class="banner info" role="status">{{ cfgNotice }}</p>
+        <form v-if="cfgEdit" ref="cfgForm" class="banner warn" @submit.prevent="saveConfig">
+          <p>{{ t(cfgEdit.remove ? 'td.confirmReset' : 'td.confirmEdit', { topic: name, key: cfgEdit.key }) }}</p>
+          <div class="toolbar">
+            <label v-if="!cfgEdit.remove">{{ t('col.cfgValue') }}
+              <input v-model="cfgEdit.value" :type="cfgEdit.sensitive ? 'password' : 'text'" :disabled="cfgBusy" autocomplete="off" spellcheck="false">
+            </label>
+            <button type="submit" class="primary" :disabled="cfgBusy || (cfgEdit.sensitive && !cfgEdit.remove && !cfgEdit.value)">{{ t(cfgEdit.remove ? 'manage.reset' : 'manage.save') }}</button>
+            <button type="button" :disabled="cfgBusy" @click="cfgEdit = null">{{ t('manage.cancel') }}</button>
+          </div>
+        </form>
         <table v-if="configs">
-          <thead><tr><th>{{ t('col.cfgName') }}</th><th>{{ t('col.cfgValue') }}</th><th>{{ t('col.source') }}</th></tr></thead>
+          <thead><tr><th>{{ t('col.cfgName') }}</th><th>{{ t('col.cfgValue') }}</th><th>{{ t('col.source') }}</th><th>{{ t('manage.actions') }}</th></tr></thead>
           <tbody>
-            <tr v-for="c in shownConfigs" :key="c.key"><td class="mono">{{ c.key }}</td><td class="mono">{{ c.sensitive ? '******' : c.value }}</td><td><span class="badge" :class="c.source === 'DEFAULT_CONFIG' ? 'muted' : 'info'">{{ c.source }}</span></td></tr>
-            <tr v-if="!shownConfigs.length"><td colspan="3" class="empty">{{ t('empty.config') }}</td></tr>
+            <tr v-for="c in shownConfigs" :key="c.key">
+              <td class="mono">{{ c.key }}</td><td class="mono">{{ c.sensitive ? '******' : c.value }}</td>
+              <td><span class="badge" :class="c.source === 'DYNAMIC_TOPIC_CONFIG' ? 'info' : 'muted'">{{ c.source }}</span></td>
+              <td class="action-buttons">
+                <span v-if="c.readOnly" class="muted">{{ t('manage.readOnly') }}</span>
+                <template v-else-if="cfgTarget">
+                  <button :disabled="cfgBusy || cfgLoading" :aria-label="t('manage.edit') + ': ' + c.key" @click="editConfig(c)">{{ t('manage.edit') }}</button>
+                  <button v-if="c.source === 'DYNAMIC_TOPIC_CONFIG'" :disabled="cfgBusy || cfgLoading" :aria-label="t('manage.reset') + ': ' + c.key" @click="editConfig(c, true)">{{ t('manage.reset') }}</button>
+                </template>
+              </td>
+            </tr>
+            <tr v-if="!shownConfigs.length"><td colspan="4" class="empty">{{ t('empty.config') }}</td></tr>
           </tbody>
         </table>
       </div>
